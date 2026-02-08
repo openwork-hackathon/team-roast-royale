@@ -172,17 +172,38 @@ class Game {
         break;
     }
 
-    // Emit phase change
-    io.to(this.id).emit('phaseChange', {
+    // Emit phase change (game: prefix for frontend compatibility)
+    const phaseData = {
       phase: nextPhase,
       prompt: this.currentPrompt,
       timeRemaining: PHASE_DURATION[nextPhase],
       roastOrder: nextPhase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : undefined
-    });
+    };
+    io.to(this.id).emit('game:phase-change', phaseData);
+    io.to(this.id).emit('phaseChange', phaseData); // legacy
 
-    // Schedule next phase transition
+    // Also emit full state update so frontend stays in sync
+    io.to(this.id).emit('game:state', this.getPublicState());
+
+    // If reveal phase, emit reveal event
+    if (nextPhase === PHASE.REVEAL) {
+      io.to(this.id).emit('game:reveal', {
+        results: this._getVoteResults(),
+        humanPlayerId: this.humanPlayer.id
+      });
+    }
+
+    // Schedule next phase transition + countdown timer
     if (PHASE_DURATION[nextPhase] && nextPhase !== PHASE.ENDED) {
       this.phaseTimer = setTimeout(() => this.advancePhase(io), PHASE_DURATION[nextPhase]);
+      
+      // Broadcast timer every second
+      clearInterval(this.timerInterval);
+      this.timerInterval = setInterval(() => {
+        const remaining = this._getTimeRemaining();
+        io.to(this.id).emit('game:timer', remaining);
+        if (remaining <= 0) clearInterval(this.timerInterval);
+      }, 1000);
     }
 
     // Trigger AI responses for this phase
@@ -220,7 +241,8 @@ class Game {
           if (response && this.phase === phase) {
             const msg = this.addMessage(agent.id, response);
             if (msg) {
-              io.to(this.id).emit('message', msg);
+              io.to(this.id).emit('game:message', msg);
+              io.to(this.id).emit('message', msg); // legacy
             }
           }
         } catch (err) {
@@ -228,6 +250,19 @@ class Game {
         }
       }, delay);
     }
+  }
+
+  _getVoteResults() {
+    const counts = {};
+    Object.values(this.votes).forEach(targetId => {
+      counts[targetId] = (counts[targetId] || 0) + 1;
+    });
+    return this.players.map(p => ({
+      playerId: p.id,
+      playerName: p.name,
+      isHuman: p.isHuman,
+      votesReceived: counts[p.id] || 0
+    })).sort((a, b) => b.votesReceived - a.votesReceived);
   }
 
   _aiVote() {
