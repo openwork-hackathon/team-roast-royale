@@ -84,22 +84,64 @@ class Game {
     return shuffled;
   }
 
+  // Map backend phases to frontend phase names
+  _frontendPhase(phase) {
+    const map = {
+      [PHASE.LOBBY]: 'lobby',
+      [PHASE.ROUND1_HOTTAKES]: 'round1',
+      [PHASE.ROUND2_ROAST]: 'round2',
+      [PHASE.ROUND3_CHAOS]: 'round3',
+      [PHASE.VOTING]: 'voting',
+      [PHASE.REVEAL]: 'reveal',
+      [PHASE.ENDED]: 'ended',
+    };
+    return map[phase] || phase;
+  }
+
+  // Generate consistent avatar color from player name
+  _avatarColor(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash % 360);
+    return `hsl(${hue}, 65%, 45%)`;
+  }
+
   getPublicState() {
+    const frontendPhase = this._frontendPhase(this.phase);
     return {
       id: this.id,
-      phase: this.phase,
+      phase: this.phase, // raw phase for backend compat
+      // Frontend expects nested round object
+      round: {
+        phase: frontendPhase,
+        roundNumber: frontendPhase.startsWith('round') ? parseInt(frontendPhase.slice(-1)) : 0,
+        prompt: this.currentPrompt || '',
+        timeRemaining: this._getTimeRemaining(),
+        totalTime: PHASE_DURATION[this.phase] || 0,
+      },
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,
+        avatar: this._avatarColor(p.name),
+        isHuman: false, // never reveal who's human until reveal phase
         isConnected: p.isHuman ? p.isConnected : true
       })),
-      messages: this.messages,
+      // Frontend expects messages with 'content' not 'text'
+      messages: this.messages.map(m => ({
+        id: m.id,
+        playerId: m.playerId,
+        playerName: m.playerName,
+        avatar: this._avatarColor(m.playerName),
+        content: m.text,
+        timestamp: m.timestamp,
+      })),
       currentPrompt: this.currentPrompt,
       votes: this.phase === PHASE.REVEAL ? this.votes : this._getVoteCounts(),
       roastOrder: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : [],
       currentRoastTurn: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder[this.roastIndex]?.id : null,
       timeRemaining: this._getTimeRemaining(),
-      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer.id : null
+      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer.id : null,
+      results: this.phase === PHASE.REVEAL ? this._getVoteResults() : null,
     };
   }
 
@@ -125,7 +167,9 @@ class Game {
       id: uuid().slice(0, 8),
       playerId,
       playerName: player.name,
+      avatar: this._avatarColor(player.name),
       text,
+      content: text, // frontend expects 'content'
       timestamp: Date.now(),
       phase: this.phase
     };
@@ -173,10 +217,13 @@ class Game {
     }
 
     // Emit phase change (game: prefix for frontend compatibility)
+    const frontendPhase = this._frontendPhase(nextPhase);
     const phaseData = {
-      phase: nextPhase,
-      prompt: this.currentPrompt,
+      phase: frontendPhase,
+      roundNumber: frontendPhase.startsWith('round') ? parseInt(frontendPhase.slice(-1)) : 0,
+      prompt: this.currentPrompt || '',
       timeRemaining: PHASE_DURATION[nextPhase],
+      totalTime: PHASE_DURATION[nextPhase],
       roastOrder: nextPhase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : undefined
     };
     io.to(this.id).emit('game:phase-change', phaseData);
