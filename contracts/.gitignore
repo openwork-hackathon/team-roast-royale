@@ -1,0 +1,14 @@
+node_modules
+.env
+coverage
+coverage.json
+typechain
+typechain-types
+
+# Hardhat files
+cache
+artifacts
+
+# Deployments (remove this line if you want to commit deployment info)
+deployments/*.json
+!deployments/.gitkeep
