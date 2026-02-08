@@ -1,3 +1,6 @@
 {
-  "rootDirectory": "frontend"
+  "framework": "nextjs",
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "installCommand": "echo 'skip root install'",
+  "outputDirectory": "frontend/.next"
 }
