@@ -1,0 +1,97 @@
+@import "tailwindcss";
+
+:root {
+  --color-fire-500: #f97316;
+  --color-fire-600: #ea580c;
+  --color-fire-700: #c2410c;
+  --color-neon-cyan: #22d3ee;
+  --color-neon-pink: #ec4899;
+  --color-neon-purple: #a855f7;
+  --bg-dark: #0a0a0f;
+  --bg-card: #13131a;
+  --bg-card-hover: #1a1a25;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-dark);
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Fire gradient text */
+.text-fire {
+  background: linear-gradient(135deg, #f97316, #ef4444, #f59e0b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glow effects */
+.glow-fire {
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.4), 0 0 60px rgba(249, 115, 22, 0.1);
+}
+
+.glow-neon {
+  box-shadow: 0 0 20px rgba(34, 211, 238, 0.3), 0 0 60px rgba(34, 211, 238, 0.1);
+}
+
+/* Animated fire background */
+.fire-bg {
+  background: radial-gradient(ellipse at bottom, rgba(249, 115, 22, 0.15) 0%, transparent 60%),
+              radial-gradient(ellipse at top left, rgba(168, 85, 247, 0.1) 0%, transparent 50%),
+              var(--bg-dark);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+/* Timer bar animation */
+@keyframes timerShrink {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.timer-bar {
+  animation: timerShrink var(--timer-duration, 90s) linear forwards;
+}
+
+/* Pulse glow */
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.pulse-glow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+/* Card flip */
+.flip-card {
+  perspective: 1000px;
+}
+.flip-card-inner {
+  transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+.flip-card-inner.flipped {
+  transform: rotateY(180deg);
+}
+.flip-card-front, .flip-card-back {
+  backface-visibility: hidden;
+}
+.flip-card-back {
+  transform: rotateY(180deg);
+}
