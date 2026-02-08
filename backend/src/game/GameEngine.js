@@ -286,11 +286,13 @@ class Game {
 class GameEngine {
   constructor() {
     this.games = new Map();
+    this.totalGamesCreated = 0;
   }
 
   createGame(playerName) {
     const game = new Game(playerName);
     this.games.set(game.id, game);
+    this.totalGamesCreated++;
     
     // Auto-cleanup after 30 minutes
     setTimeout(() => this.games.delete(game.id), 30 * 60 * 1000);
