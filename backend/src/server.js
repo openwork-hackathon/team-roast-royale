@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { GameEngine } = require('./game/GameEngine');
 const { setupSocketHandlers } = require('./routes/socketHandlers');
+const { BettingSystem } = require('./betting');
 
 const app = express();
 const server = createServer(app);
@@ -42,6 +43,10 @@ app.use((req, res, next) => {
 // Game engine (in-memory, no DB for MVP)
 const gameEngine = new GameEngine();
 
+// Betting system
+const bettingSystem = new BettingSystem();
+gameEngine.setBettingSystem(bettingSystem);
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
@@ -69,7 +74,10 @@ app.get('/api/status', (req, res) => {
       'Real-time Socket.io multiplayer',
       'AI voting with 40% accuracy (slightly better than random)',
       'Staggered AI response timing (2-10s) for natural feel',
-      'Fallback responses when LLM is unavailable'
+      'Fallback responses when LLM is unavailable',
+      'On-chain betting with $OPENWORK on Base',
+      'Per-round deposit wallets with real-time monitoring',
+      'Automated payouts: House 5% / Most Human 30% / Correct Guessers 65%'
     ],
     stats: {
       activeGames: games.length,
@@ -149,6 +157,22 @@ io.on('connection', () => {
 
 // Socket.io handlers
 setupSocketHandlers(io, gameEngine);
+
+// Betting socket handlers
+bettingSystem.setupSocketHandlers(io);
+
+// Betting API endpoints
+app.get('/api/games/:gameId/betting', (req, res) => {
+  const state = bettingSystem.getState(req.params.gameId);
+  if (!state) return res.status(404).json({ error: 'No betting data for this game' });
+  res.json(state);
+});
+
+app.get('/api/games/:gameId/betting/:roundNum', (req, res) => {
+  const state = bettingSystem.getState(req.params.gameId, parseInt(req.params.roundNum));
+  if (!state) return res.status(404).json({ error: 'No betting data for this round' });
+  res.json(state);
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

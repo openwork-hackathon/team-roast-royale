@@ -195,24 +195,42 @@ class Game {
     this.phase = nextPhase;
     this.phaseStartedAt = Date.now();
 
+    const betting = this.bettingSystem;
+
     // Phase-specific setup
     switch (nextPhase) {
       case PHASE.ROUND1_HOTTAKES:
         this.currentPrompt = HOT_TAKE_PROMPTS[Math.floor(Math.random() * HOT_TAKE_PROMPTS.length)];
+        if (betting) betting.openBetting(this.id, 1, io);
         break;
       case PHASE.ROUND2_ROAST:
         this.roastOrder = this._shufflePlayers([...this.players]);
         this.roastIndex = 0;
+        if (betting) betting.openBetting(this.id, 2, io);
         break;
       case PHASE.ROUND3_CHAOS:
         this.currentPrompt = "FREE FOR ALL! Say whatever you want. Accuse someone. Defend yourself. CHAOS ROUND! 🔥";
+        if (betting) betting.openBetting(this.id, 3, io);
         break;
       case PHASE.VOTING:
         // AI agents vote
         this._aiVote();
+        // Close betting for all rounds
+        if (betting) {
+          for (let r = 1; r <= 3; r++) {
+            try { betting.closeBetting(this.id, r, io); } catch(e) {}
+          }
+        }
         break;
       case PHASE.REVEAL:
-        // Nothing to do — state already has humanPlayerId
+        // Resolve bets and trigger payouts
+        if (betting) {
+          for (let r = 1; r <= 3; r++) {
+            betting.resolveAndPayout(this.id, r, io).catch(err => {
+              console.error(`Payout error game ${this.id} round ${r}:`, err.message);
+            });
+          }
+        }
         break;
     }
 
@@ -334,15 +352,33 @@ class GameEngine {
   constructor() {
     this.games = new Map();
     this.totalGamesCreated = 0;
+    this.bettingSystem = null;
+  }
+
+  setBettingSystem(bettingSystem) {
+    this.bettingSystem = bettingSystem;
   }
 
   createGame(playerName) {
     const game = new Game(playerName);
+    game.bettingSystem = this.bettingSystem || null;
     this.games.set(game.id, game);
     this.totalGamesCreated++;
     
+    // Initialize betting for this game
+    if (this.bettingSystem) {
+      this.bettingSystem.initGame(
+        game.id,
+        game.humanPlayer.id,
+        game.players.map(p => ({ id: p.id, name: p.name }))
+      );
+    }
+    
     // Auto-cleanup after 30 minutes
-    setTimeout(() => this.games.delete(game.id), 30 * 60 * 1000);
+    setTimeout(() => {
+      this.games.delete(game.id);
+      if (this.bettingSystem) this.bettingSystem.cleanupGame(game.id);
+    }, 30 * 60 * 1000);
     
     return game;
   }
