@@ -8,11 +8,31 @@ import ChatBubble from '@/components/ChatBubble';
 import RoundHeader from '@/components/RoundHeader';
 import VotingOverlay from '@/components/VotingOverlay';
 import RevealOverlay from '@/components/RevealOverlay';
+import BettingPanel from '@/components/BettingPanel';
+import WalletBadge from '@/components/WalletBadge';
+import PayoutOverlay from '@/components/PayoutOverlay';
+import type { BetInfo } from '@/types/game';
 
 export default function GamePage() {
   const params = useParams();
   const gameId = params.id as string;
-  const { connected, gameState, sendMessage, submitVote, joinGame } = useSocket();
+  const {
+    connected,
+    gameState,
+    sendMessage,
+    submitVote,
+    joinGame,
+    // Betting
+    bettingPool,
+    myWallet,
+    myBet,
+    bettingResult,
+    isBettingOpen,
+    placeBet,
+    demoDeposit,
+    setMyBet,
+    clearBettingResult,
+  } = useSocket();
   const [input, setInput] = useState('');
   const [playerId, setPlayerId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -45,17 +65,38 @@ export default function GamePage() {
     setInput('');
   };
 
+  const handlePlaceBet = (targetPlayerId: string) => {
+    const roundNum = gameState?.round?.roundNumber ?? 1;
+    placeBet(gameId, roundNum, targetPlayerId);
+  };
+
+  const handleDemoDeposit = () => {
+    const roundNum = gameState?.round?.roundNumber ?? 1;
+    demoDeposit(gameId, roundNum, 100);
+  };
+
+  const handleBetPlaced = (bet: BetInfo) => {
+    setMyBet(bet);
+  };
+
   const phase = gameState?.round?.phase;
   const messages = gameState?.messages ?? [];
   const players = gameState?.players ?? [];
   const isVoting = phase === 'voting';
   const isReveal = phase === 'reveal';
+  const isRoundPhase = phase && ['round1', 'round2', 'round3'].includes(phase);
+  const currentRound = gameState?.round?.roundNumber ?? 1;
 
   return (
     <main className="h-screen flex flex-col relative overflow-hidden">
       {/* Header */}
       <div className="shrink-0 px-4 pt-4 pb-3 border-b border-white/5">
-        {gameState?.round && <RoundHeader round={gameState.round} />}
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            {gameState?.round && <RoundHeader round={gameState.round} />}
+          </div>
+          <WalletBadge wallet={myWallet} />
+        </div>
       </div>
 
       {/* Online players bar */}
@@ -88,6 +129,31 @@ export default function GamePage() {
         </AnimatePresence>
         <div ref={chatEndRef} />
       </div>
+
+      {/* Betting Panel (during rounds) */}
+      <AnimatePresence>
+        {isRoundPhase && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            className="shrink-0 px-4 pb-2"
+          >
+            <BettingPanel
+              players={players}
+              bettingPool={bettingPool}
+              myWallet={myWallet}
+              myBet={myBet}
+              isBettingOpen={isBettingOpen}
+              currentRound={currentRound}
+              gameId={gameId}
+              onPlaceBet={handlePlaceBet}
+              onDemoDeposit={handleDemoDeposit}
+              onBetPlaced={handleBetPlaced}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Input */}
       {phase && !['voting', 'reveal', 'ended'].includes(phase) && (
@@ -135,6 +201,17 @@ export default function GamePage() {
           <RevealOverlay
             results={gameState.results}
             humanPlayerId={gameState.humanPlayerId}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Betting Payout Overlay */}
+      <AnimatePresence>
+        {bettingResult && (
+          <PayoutOverlay
+            result={bettingResult}
+            myWalletAddress={myWallet?.address}
+            onClose={clearBettingResult}
           />
         )}
       </AnimatePresence>
