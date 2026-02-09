@@ -95,7 +95,16 @@ export default function GamePage() {
           <div className="flex-1 min-w-0">
             {gameState?.round && <RoundHeader round={gameState.round} />}
           </div>
-          <WalletBadge wallet={myWallet} />
+          <div className="flex items-center gap-3">
+            {/* Connection Status Indicator */}
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-white/5 rounded-full">
+              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className={`text-[10px] font-medium ${connected ? 'text-green-400' : 'text-red-400'}`}>
+                {connected ? 'Live' : 'Offline'}
+              </span>
+            </div>
+            <WalletBadge wallet={myWallet} />
+          </div>
         </div>
       </div>
 
@@ -137,7 +146,7 @@ export default function GamePage() {
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 20, opacity: 0 }}
-            className="shrink-0 px-4 pb-2"
+            className="shrink-0 px-4 py-2 border-t border-white/5"
           >
             <BettingPanel
               players={players}

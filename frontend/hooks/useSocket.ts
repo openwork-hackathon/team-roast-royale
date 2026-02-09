@@ -74,13 +74,15 @@ export function useSocket() {
     });
 
     // Betting events
-    socket.on('game:betting-open', ({ roundNum, walletAddress }) => {
+    socket.on('game:betting-open', ({ roundNum, walletAddress, gameId }) => {
+      console.log('[Socket] Betting open received:', { roundNum, walletAddress, gameId });
       setIsBettingOpen(true);
       setMyWallet({
         address: walletAddress,
         balance: 1000, // Demo balance
         isDemo: true,
       });
+      // Reset bet state for new round
       setMyBet(null);
       setBettingResult(null);
     });

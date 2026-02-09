@@ -93,6 +93,11 @@ export default function BettingPanel({
   const hasPlacedBet = myBet !== null;
   const canBet = isBettingOpen && !hasPlacedBet && myWallet !== null;
 
+  // Debug logging
+  useEffect(() => {
+    console.log('[BettingPanel] State:', { isBettingOpen, hasPlacedBet, hasWallet: !!myWallet, canBet, currentRound });
+  }, [isBettingOpen, hasPlacedBet, myWallet, canBet, currentRound]);
+
   return (
     <motion.div
       initial={{ y: 20, opacity: 0 }}
