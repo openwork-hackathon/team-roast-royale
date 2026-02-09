@@ -22,26 +22,21 @@ export default function GamePage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [gameState?.messages?.length]);
 
-  // Get player ID from session storage
+  // Always rejoin game when socket connects (new socket = new connection)
   useEffect(() => {
-    const stored = sessionStorage.getItem(`roast-royale-${gameId}`);
-    if (stored) {
-      setPlayerId(stored);
+    if (connected && gameId) {
+      const storedId = sessionStorage.getItem(`roast-royale-${gameId}`);
+      const name = sessionStorage.getItem('roast-royale-name') || 'Player';
+      console.log('[Game] Joining game', gameId, 'name:', name, 'storedId:', storedId);
+      joinGame(gameId, name).then(res => {
+        console.log('[Game] Joined! playerId:', res.playerId);
+        setPlayerId(res.playerId);
+        sessionStorage.setItem(`roast-royale-${gameId}`, res.playerId);
+      }).catch(err => {
+        console.error('[Game] Join failed:', err);
+      });
     }
-  }, [gameId]);
-
-  // Join game if we have a stored player name but no player ID for this game
-  useEffect(() => {
-    if (connected && !playerId && gameId) {
-      const name = sessionStorage.getItem('roast-royale-name');
-      if (name) {
-        joinGame(gameId, name).then(res => {
-          setPlayerId(res.playerId);
-          sessionStorage.setItem(`roast-royale-${gameId}`, res.playerId);
-        });
-      }
-    }
-  }, [connected, playerId, gameId, joinGame]);
+  }, [connected, gameId, joinGame]);
 
   const handleSend = () => {
     const text = input.trim();

@@ -14,9 +14,15 @@ export function useSocket() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('[Socket] Connecting to:', API_URL);
     const socket = io(API_URL, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       autoConnect: true,
+      withCredentials: false,
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('[Socket] Connection error:', err.message);
     });
 
     socketRef.current = socket;

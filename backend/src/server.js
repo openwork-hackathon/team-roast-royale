@@ -13,19 +13,15 @@ const FRONTEND_URL = process.env.FRONTEND_URL || '*';
 
 const io = new Server(server, {
   cors: {
-    origin: FRONTEND_URL === '*' ? '*' : [FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'],
-    methods: ['GET', 'POST'],
-    credentials: true
+    origin: '*',
+    methods: ['GET', 'POST']
   },
   pingInterval: 10000,
   pingTimeout: 5000,
-  transports: ['websocket', 'polling']
+  transports: ['polling', 'websocket']
 });
 
-app.use(cors({
-  origin: FRONTEND_URL === '*' ? '*' : [FRONTEND_URL, 'http://localhost:3000'],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 
 // Request logging

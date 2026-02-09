@@ -28,6 +28,9 @@ export default function LobbyPage() {
     try {
       const result = await createGame(playerName.trim());
       setGameId(result.gameId);
+      // Save to sessionStorage so game page can rejoin
+      sessionStorage.setItem('roast-royale-name', playerName.trim());
+      sessionStorage.setItem(`roast-royale-${result.gameId}`, result.playerId);
     } catch {
       setIsCreating(false);
     }
