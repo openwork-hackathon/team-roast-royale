@@ -85,22 +85,64 @@ class Game {
     return shuffled;
   }
 
+  // Map backend phases to frontend phase names
+  _frontendPhase(phase) {
+    const map = {
+      [PHASE.LOBBY]: 'lobby',
+      [PHASE.ROUND1_HOTTAKES]: 'round1',
+      [PHASE.ROUND2_ROAST]: 'round2',
+      [PHASE.ROUND3_CHAOS]: 'round3',
+      [PHASE.VOTING]: 'voting',
+      [PHASE.REVEAL]: 'reveal',
+      [PHASE.ENDED]: 'ended',
+    };
+    return map[phase] || phase;
+  }
+
+  // Generate consistent avatar color from player name
+  _avatarColor(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const hue = Math.abs(hash % 360);
+    return `hsl(${hue}, 65%, 45%)`;
+  }
+
   getPublicState() {
+    const frontendPhase = this._frontendPhase(this.phase);
     return {
       id: this.id,
-      phase: this.phase,
+      phase: this.phase, // raw phase for backend compat
+      // Frontend expects nested round object
+      round: {
+        phase: frontendPhase,
+        roundNumber: frontendPhase.startsWith('round') ? parseInt(frontendPhase.slice(-1)) : 0,
+        prompt: this.currentPrompt || '',
+        timeRemaining: this._getTimeRemaining(),
+        totalTime: PHASE_DURATION[this.phase] || 0,
+      },
       players: this.players.map(p => ({
         id: p.id,
         name: p.name,
+        avatar: this._avatarColor(p.name),
+        isHuman: false, // never reveal who's human until reveal phase
         isConnected: p.isHuman ? p.isConnected : true
       })),
-      messages: this.messages,
+      // Frontend expects messages with 'content' not 'text'
+      messages: this.messages.map(m => ({
+        id: m.id,
+        playerId: m.playerId,
+        playerName: m.playerName,
+        avatar: this._avatarColor(m.playerName),
+        content: m.text,
+        timestamp: m.timestamp,
+      })),
       currentPrompt: this.currentPrompt,
       votes: this.phase === PHASE.REVEAL ? this.votes : this._getVoteCounts(),
       roastOrder: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : [],
       currentRoastTurn: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder[this.roastIndex]?.id : null,
       timeRemaining: this._getTimeRemaining(),
-      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer.id : null
+      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer.id : null,
+      results: this.phase === PHASE.REVEAL ? this._getVoteResults() : null,
     };
   }
 
@@ -126,7 +168,9 @@ class Game {
       id: uuid().slice(0, 8),
       playerId,
       playerName: player.name,
+      avatar: this._avatarColor(player.name),
       text,
+      content: text, // frontend expects 'content'
       timestamp: Date.now(),
       phase: this.phase
     };
@@ -152,38 +196,80 @@ class Game {
     this.phase = nextPhase;
     this.phaseStartedAt = Date.now();
 
+    const betting = this.bettingSystem;
+
     // Phase-specific setup
     switch (nextPhase) {
       case PHASE.ROUND1_HOTTAKES:
         this.currentPrompt = HOT_TAKE_PROMPTS[Math.floor(Math.random() * HOT_TAKE_PROMPTS.length)];
+        if (betting) betting.openBetting(this.id, 1, io);
         break;
       case PHASE.ROUND2_ROAST:
         this.roastOrder = this._shufflePlayers([...this.players]);
         this.roastIndex = 0;
+        if (betting) betting.openBetting(this.id, 2, io);
         break;
       case PHASE.ROUND3_CHAOS:
         this.currentPrompt = "FREE FOR ALL! Say whatever you want. Accuse someone. Defend yourself. CHAOS ROUND! 🔥";
+        if (betting) betting.openBetting(this.id, 3, io);
         break;
       case PHASE.VOTING:
         // AI agents vote
         this._aiVote();
+        // Close betting for all rounds
+        if (betting) {
+          for (let r = 1; r <= 3; r++) {
+            try { betting.closeBetting(this.id, r, io); } catch(e) {}
+          }
+        }
         break;
       case PHASE.REVEAL:
-        // Nothing to do — state already has humanPlayerId
+        // Resolve bets and trigger payouts
+        if (betting) {
+          for (let r = 1; r <= 3; r++) {
+            betting.resolveAndPayout(this.id, r, io).catch(err => {
+              console.error(`Payout error game ${this.id} round ${r}:`, err.message);
+            });
+          }
+        }
         break;
     }
 
-    // Emit phase change
-    io.to(this.id).emit('phaseChange', {
-      phase: nextPhase,
-      prompt: this.currentPrompt,
+    // Emit phase change (game: prefix for frontend compatibility)
+    const frontendPhase = this._frontendPhase(nextPhase);
+    const phaseData = {
+      phase: frontendPhase,
+      roundNumber: frontendPhase.startsWith('round') ? parseInt(frontendPhase.slice(-1)) : 0,
+      prompt: this.currentPrompt || '',
       timeRemaining: PHASE_DURATION[nextPhase],
+      totalTime: PHASE_DURATION[nextPhase],
       roastOrder: nextPhase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : undefined
-    });
+    };
+    io.to(this.id).emit('game:phase-change', phaseData);
+    io.to(this.id).emit('phaseChange', phaseData); // legacy
 
-    // Schedule next phase transition
+    // Also emit full state update so frontend stays in sync
+    io.to(this.id).emit('game:state', this.getPublicState());
+
+    // If reveal phase, emit reveal event
+    if (nextPhase === PHASE.REVEAL) {
+      io.to(this.id).emit('game:reveal', {
+        results: this._getVoteResults(),
+        humanPlayerId: this.humanPlayer.id
+      });
+    }
+
+    // Schedule next phase transition + countdown timer
     if (PHASE_DURATION[nextPhase] && nextPhase !== PHASE.ENDED) {
       this.phaseTimer = setTimeout(() => this.advancePhase(io), PHASE_DURATION[nextPhase]);
+      
+      // Broadcast timer every second
+      clearInterval(this.timerInterval);
+      this.timerInterval = setInterval(() => {
+        const remaining = this._getTimeRemaining();
+        io.to(this.id).emit('game:timer', remaining);
+        if (remaining <= 0) clearInterval(this.timerInterval);
+      }, 1000);
     }
 
     // Trigger AI responses for this phase
@@ -221,7 +307,8 @@ class Game {
           if (response && this.phase === phase) {
             const msg = this.addMessage(agent.id, response);
             if (msg) {
-              io.to(this.id).emit('message', msg);
+              io.to(this.id).emit('game:message', msg);
+              io.to(this.id).emit('message', msg); // legacy
             }
           }
         } catch (err) {
@@ -229,6 +316,19 @@ class Game {
         }
       }, delay);
     }
+  }
+
+  _getVoteResults() {
+    const counts = {};
+    Object.values(this.votes).forEach(targetId => {
+      counts[targetId] = (counts[targetId] || 0) + 1;
+    });
+    return this.players.map(p => ({
+      playerId: p.id,
+      playerName: p.name,
+      isHuman: p.isHuman,
+      votesReceived: counts[p.id] || 0
+    })).sort((a, b) => b.votesReceived - a.votesReceived);
   }
 
   _aiVote() {
@@ -252,14 +352,34 @@ class Game {
 class GameEngine {
   constructor() {
     this.games = new Map();
+    this.totalGamesCreated = 0;
+    this.bettingSystem = null;
+  }
+
+  setBettingSystem(bettingSystem) {
+    this.bettingSystem = bettingSystem;
   }
 
   createGame(playerName) {
     const game = new Game(playerName);
+    game.bettingSystem = this.bettingSystem || null;
     this.games.set(game.id, game);
+    this.totalGamesCreated++;
+    
+    // Initialize betting for this game
+    if (this.bettingSystem) {
+      this.bettingSystem.initGame(
+        game.id,
+        game.humanPlayer.id,
+        game.players.map(p => ({ id: p.id, name: p.name }))
+      );
+    }
     
     // Auto-cleanup after 30 minutes
-    setTimeout(() => this.games.delete(game.id), 30 * 60 * 1000);
+    setTimeout(() => {
+      this.games.delete(game.id);
+      if (this.bettingSystem) this.bettingSystem.cleanupGame(game.id);
+    }, 30 * 60 * 1000);
     
     return game;
   }
