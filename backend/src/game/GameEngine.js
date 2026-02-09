@@ -13,13 +13,14 @@ const PHASE = {
 };
 
 // Phase durations (ms)
+const TEST_MODE = process.env.TEST_MODE === 'true';
 const PHASE_DURATION = {
-  [PHASE.LOBBY]: 30000,       // 30s
-  [PHASE.ROUND1_HOTTAKES]: 90000,  // 90s
-  [PHASE.ROUND2_ROAST]: 120000,    // 120s
-  [PHASE.ROUND3_CHAOS]: 90000,     // 90s
-  [PHASE.VOTING]: 30000,      // 30s
-  [PHASE.REVEAL]: 15000,      // 15s
+  [PHASE.LOBBY]: TEST_MODE ? 3000 : 30000,       // 30s (3s test)
+  [PHASE.ROUND1_HOTTAKES]: TEST_MODE ? 15000 : 90000,  // 90s (15s test)
+  [PHASE.ROUND2_ROAST]: TEST_MODE ? 15000 : 120000,    // 120s (15s test)
+  [PHASE.ROUND3_CHAOS]: TEST_MODE ? 15000 : 90000,     // 90s (15s test)
+  [PHASE.VOTING]: TEST_MODE ? 10000 : 30000,      // 30s (10s test)
+  [PHASE.REVEAL]: TEST_MODE ? 5000 : 15000,       // 15s (5s test)
 };
 
 // Phase transitions
