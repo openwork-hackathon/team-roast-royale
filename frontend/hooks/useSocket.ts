@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, ChatMessage, Player, RoundInfo, VoteResult } from '@/types/game';
+import type { GameState, ChatMessage, Player, RoundInfo, VoteResult, BettingPool, BettingResult, WalletInfo, BetInfo } from '@/types/game';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -12,6 +12,13 @@ export function useSocket() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  
+  // Betting state
+  const [bettingPool, setBettingPool] = useState<BettingPool | null>(null);
+  const [myWallet, setMyWallet] = useState<WalletInfo | null>(null);
+  const [myBet, setMyBet] = useState<BetInfo | null>(null);
+  const [bettingResult, setBettingResult] = useState<BettingResult | null>(null);
+  const [isBettingOpen, setIsBettingOpen] = useState(false);
 
   useEffect(() => {
     console.log('[Socket] Connecting to:', API_URL);
@@ -66,6 +73,35 @@ export function useSocket() {
       setError(message);
     });
 
+    // Betting events
+    socket.on('game:betting-open', ({ roundNum, walletAddress }) => {
+      setIsBettingOpen(true);
+      setMyWallet({
+        address: walletAddress,
+        balance: 1000, // Demo balance
+        isDemo: true,
+      });
+      setMyBet(null);
+      setBettingResult(null);
+    });
+
+    socket.on('game:betting-pool', ({ roundNum, totalPool, depositorCount }) => {
+      setBettingPool({
+        roundNum,
+        total: totalPool,
+        depositorCount,
+      });
+    });
+
+    socket.on('game:betting-closed', () => {
+      setIsBettingOpen(false);
+    });
+
+    socket.on('game:betting-result', (result) => {
+      setBettingResult(result);
+      setIsBettingOpen(false);
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -97,6 +133,25 @@ export function useSocket() {
     socketRef.current?.emit('game:vote', { gameId, votedForId });
   }, []);
 
+  // Betting actions
+  const placeBet = useCallback((gameId: string, roundNum: number, targetPlayerId: string) => {
+    if (!myWallet) return;
+    socketRef.current?.emit('game:bet-place', {
+      gameId,
+      roundNum,
+      targetPlayerId,
+      walletAddress: myWallet.address,
+    });
+  }, [myWallet]);
+
+  const demoDeposit = useCallback((gameId: string, roundNum: number, amount: number = 100) => {
+    socketRef.current?.emit('game:demo-deposit', { gameId, roundNum, amount });
+  }, []);
+
+  const clearBettingResult = useCallback(() => {
+    setBettingResult(null);
+  }, []);
+
   return {
     connected,
     gameState,
@@ -106,5 +161,15 @@ export function useSocket() {
     joinGame,
     sendMessage,
     submitVote,
+    // Betting
+    bettingPool,
+    myWallet,
+    myBet,
+    bettingResult,
+    isBettingOpen,
+    placeBet,
+    demoDeposit,
+    setMyBet,
+    clearBettingResult,
   };
 }

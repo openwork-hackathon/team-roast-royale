@@ -1,12 +1,25 @@
-const { WalletManager } = require('./WalletManager');
-const { DepositMonitor } = require('./DepositMonitor');
 const { BettingEngine } = require('./BettingEngine');
-const { PayoutExecutor } = require('./PayoutExecutor');
+
+const DEMO_MODE = process.env.DEMO_MODE === 'true' || process.env.DEMO_MODE === '1';
+
+// Lazy-load real modules only when NOT in demo mode
+function loadModules() {
+  if (DEMO_MODE) {
+    const { DemoWalletManager } = require('./DemoWalletManager');
+    const { DemoDepositMonitor } = require('./DemoDepositMonitor');
+    const { DemoPayoutExecutor } = require('./DemoPayoutExecutor');
+    return { WalletManager: DemoWalletManager, DepositMonitor: DemoDepositMonitor, PayoutExecutor: DemoPayoutExecutor };
+  }
+  const { WalletManager } = require('./WalletManager');
+  const { DepositMonitor } = require('./DepositMonitor');
+  const { PayoutExecutor } = require('./PayoutExecutor');
+  return { WalletManager, DepositMonitor, PayoutExecutor };
+}
 
 /**
  * BettingSystem — orchestrates all betting modules.
  * 
- * Integrates with GameEngine via Socket.io events:
+ * Set DEMO_MODE=true for fake wallets, instant deposits, no on-chain payouts.
  * 
  * Events emitted (to frontend):
  *   game:betting-open    { roundNum, walletAddress, gameId }
@@ -16,13 +29,20 @@ const { PayoutExecutor } = require('./PayoutExecutor');
  * 
  * Events received (from frontend):
  *   game:bet-place       { gameId, roundNum, targetPlayerId, walletAddress }
+ *   game:demo-deposit    { gameId, roundNum, amount }  (DEMO_MODE only)
  */
 class BettingSystem {
   constructor() {
+    const { WalletManager, DepositMonitor, PayoutExecutor } = loadModules();
+    this.demoMode = DEMO_MODE;
     this.walletManager = new WalletManager();
     this.depositMonitor = new DepositMonitor(this.walletManager);
     this.bettingEngine = new BettingEngine();
     this.payoutExecutor = new PayoutExecutor(this.walletManager);
+    
+    if (DEMO_MODE) {
+      console.log('🎰 Betting system running in DEMO MODE — no real crypto');
+    }
   }
 
   /**
@@ -216,6 +236,67 @@ class BettingSystem {
         const state = this.getState(gameId || socket.gameId, roundNum);
         socket.emit('game:bet-state', state);
       });
+
+      // DEMO MODE: simulate deposit without real blockchain
+      if (this.demoMode) {
+        socket.on('game:demo-deposit', ({ gameId, roundNum, amount }) => {
+          const gid = gameId || socket.gameId;
+          if (!gid) {
+            socket.emit('game:bet-error', { error: 'Not in a game' });
+            return;
+          }
+
+          // Generate fake wallet for this player
+          const fakeAddress = `0xPLAYER_${socket.id.slice(0, 8)}`;
+          const depositAmount = amount || '100';
+
+          // Store player's demo wallet
+          socket.demoWallet = fakeAddress;
+
+          // Simulate deposit via DemoDepositMonitor
+          this.depositMonitor.simulateDeposit(gid, roundNum, fakeAddress, depositAmount);
+
+          socket.emit('game:demo-deposit-confirmed', {
+            walletAddress: fakeAddress,
+            amount: depositAmount,
+            roundNum,
+            message: `💰 Demo deposit: ${depositAmount} $OPENWORK`
+          });
+
+          console.log(`🎰 [DEMO] Deposit: ${depositAmount} from ${fakeAddress} in game ${gid} round ${roundNum}`);
+        });
+
+        // In demo mode, allow bet without prior real deposit check
+        // Override bet-place to use demo wallet
+        socket.on('game:demo-bet', ({ gameId, roundNum, targetPlayerId }) => {
+          const gid = gameId || socket.gameId;
+          const wallet = socket.demoWallet || `0xPLAYER_${socket.id.slice(0, 8)}`;
+
+          const result = this.placeBet(gid, roundNum, wallet, targetPlayerId);
+
+          if (result.success) {
+            socket.emit('game:bet-confirmed', {
+              roundNum,
+              targetPlayerId,
+              amount: result.amount,
+              message: `🎰 Bet placed on player ${targetPlayerId}!`
+            });
+
+            const state = this.getState(gid, roundNum);
+            if (state) {
+              io.to(gid).emit('game:betting-pool', {
+                gameId: gid,
+                roundNum,
+                totalPool: state.totalPool,
+                depositorCount: state.depositorCount,
+                betCount: state.betCount
+              });
+            }
+          } else {
+            socket.emit('game:bet-error', { error: result.error });
+          }
+        });
+      }
     });
   }
 }

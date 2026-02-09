@@ -40,6 +40,52 @@ export interface GameState {
   votes: Record<string, string>; // voterId -> votedForId
   results: VoteResult[] | null;
   humanPlayerId: string | null;
+  betting?: BettingState;
+}
+
+// Betting Types
+export interface BettingState {
+  roundNum: number;
+  isOpen: boolean;
+  pool: BettingPool;
+  myWallet?: WalletInfo;
+  myBet?: BetInfo;
+}
+
+export interface BettingPool {
+  total: number;
+  depositorCount: number;
+  roundNum: number;
+}
+
+export interface WalletInfo {
+  address: string;
+  balance: number;
+  isDemo: boolean;
+}
+
+export interface BetInfo {
+  targetPlayerId: string;
+  targetPlayerName: string;
+  amount: number;
+}
+
+export interface PayoutInfo {
+  address: string;
+  amount: number;
+  isWinner: boolean;
+  type: 'house' | 'most_human' | 'correct_guess';
+}
+
+export interface BettingResult {
+  roundNum: number;
+  totalPool: number;
+  houseAmount: number;
+  mostHumanAmount: number;
+  correctGuessersAmount: number;
+  payouts: PayoutInfo[];
+  mostHumanPlayerId: string;
+  myPayout?: PayoutInfo;
 }
 
 export interface ServerEvents {
@@ -52,6 +98,11 @@ export interface ServerEvents {
   'game:countdown': (seconds: number) => void;
   'game:timer': (timeRemaining: number) => void;
   'error': (message: string) => void;
+  // Betting events
+  'game:betting-open': (data: { roundNum: number; walletAddress: string; gameId: string }) => void;
+  'game:betting-pool': (data: { roundNum: number; totalPool: number; depositorCount: number }) => void;
+  'game:betting-closed': (data: { roundNum: number; gameId: string }) => void;
+  'game:betting-result': (result: BettingResult) => void;
 }
 
 export interface ClientEvents {
@@ -59,4 +110,7 @@ export interface ClientEvents {
   'game:join': (data: { gameId: string; playerName: string }, callback: (response: { playerId: string }) => void) => void;
   'game:message': (data: { gameId: string; content: string }) => void;
   'game:vote': (data: { gameId: string; votedForId: string }) => void;
+  // Betting events
+  'game:bet-place': (data: { gameId: string; roundNum: number; targetPlayerId: string; walletAddress: string }) => void;
+  'game:demo-deposit': (data: { gameId: string; roundNum: number; amount: number }) => void;
 }
