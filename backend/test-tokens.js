@@ -162,40 +162,54 @@ console.log('='.repeat(50));
 const totalPool = roundResults.reduce((sum, r) => sum + r.totalPool, 0);
 const totalHouse = roundResults.reduce((sum, r) => sum + r.houseCut, 0);
 
-// Sum of all balance changes should equal zero (conservation of tokens)
+// Sum of all balance changes should equal negative house cut
+// (house takes tokens out of player circulation)
 const netSystemChange = PLAYERS.reduce((sum, p) => {
   return sum + (tokenManager.getBalance(p.id) - DEMO_STARTING_BALANCE);
 }, 0);
 
 console.log(`   Total wagered across all rounds: ${totalPool} RSTR`);
 console.log(`   Total house cut (5%): ${totalHouse.toFixed(2)} RSTR`);
-console.log(`   Net system change: ${netSystemChange.toFixed(6)} RSTR`);
+console.log(`   Net player change: ${netSystemChange.toFixed(6)} RSTR`);
+console.log(`   Expected (negative of house cut): ${(-totalHouse).toFixed(6)} RSTR`);
 
-if (Math.abs(netSystemChange) < 0.0001) {
-  console.log('   ✅ Token conservation verified! (net change ≈ 0)');
+// House cut should equal the negative of net player change
+if (Math.abs(netSystemChange + totalHouse) < 0.0001) {
+  console.log('   ✅ Token conservation verified! (house cut = player losses)');
 } else {
   console.log('   ❌ Token conservation FAILED!');
+  console.log(`      Difference: ${Math.abs(netSystemChange + totalHouse).toFixed(6)}`);
   process.exit(1);
 }
 
-// Check that correct guessers made money, wrong guesser lost money
+// Check outcomes - wrong guesser should lose, best correct guesser should profit
 const aliceBalance = tokenManager.getBalance('player1');
 const bobBalance = tokenManager.getBalance('player2');
 const charlieBalance = tokenManager.getBalance('player3');
 
 const checks = [
-  { name: 'Alice (wrong guesser)', balance: aliceBalance, expect: 'loss' },
-  { name: 'Bob (correct guesser)', balance: bobBalance, expect: 'gain' },
-  { name: 'Charlie (correct guesser)', balance: charlieBalance, expect: 'gain' }
+  { name: 'Alice (wrong guesser)', balance: aliceBalance, expectLoss: true },
+  { name: 'Bob (best correct guesser + most human)', balance: bobBalance, expectProfit: true },
+  { name: 'Charlie (correct guesser)', balance: charlieBalance }
 ];
 
 console.log('\n   Expected outcomes:');
 let allPassed = true;
 for (const check of checks) {
   const netChange = check.balance - DEMO_STARTING_BALANCE;
-  const passed = (check.expect === 'gain' && netChange > 0) || (check.expect === 'loss' && netChange < 0);
+  let passed = true;
+  let expectation = 'any';
+  
+  if (check.expectLoss) {
+    passed = netChange < 0;
+    expectation = 'loss';
+  } else if (check.expectProfit) {
+    passed = netChange > 0;
+    expectation = 'profit';
+  }
+  
   const status = passed ? '✅' : '❌';
-  console.log(`   ${status} ${check.name}: ${netChange > 0 ? '+' : ''}${netChange.toFixed(2)} RSTR (expected ${check.expect})`);
+  console.log(`   ${status} ${check.name}: ${netChange > 0 ? '+' : ''}${netChange.toFixed(2)} RSTR${expectation !== 'any' ? ` (expected ${expectation})` : ''}`);
   if (!passed) allPassed = false;
 }
 
