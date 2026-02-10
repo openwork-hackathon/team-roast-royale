@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import type { GameState, ChatMessage, Player, RoundInfo, VoteResult, BettingPool, BettingResult, WalletInfo, BetInfo } from '@/types/game';
+import type { GameState, ChatMessage, Player, RoundInfo, VoteResult, BettingPool, BettingResult, WalletInfo, BetInfo, TokenBalance, TokenPrice } from '@/types/game';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -19,6 +19,10 @@ export function useSocket() {
   const [myBet, setMyBet] = useState<BetInfo | null>(null);
   const [bettingResult, setBettingResult] = useState<BettingResult | null>(null);
   const [isBettingOpen, setIsBettingOpen] = useState(false);
+  
+  // Token state
+  const [tokenBalance, setTokenBalance] = useState<TokenBalance>({ balance: 100, symbol: 'RSTR' });
+  const [tokenPrice, setTokenPrice] = useState<TokenPrice>({ buyPrice: 0.0001, sellPrice: 0.00009, totalSupply: 0 });
 
   useEffect(() => {
     console.log('[Socket] Connecting to:', API_URL);
@@ -104,6 +108,15 @@ export function useSocket() {
       setIsBettingOpen(false);
     });
 
+    // Token events
+    socket.on('game:token-balance', (data: TokenBalance) => {
+      setTokenBalance(data);
+    });
+
+    socket.on('game:token-price', (data: TokenPrice) => {
+      setTokenPrice(data);
+    });
+
     return () => {
       socket.disconnect();
     };
@@ -136,15 +149,14 @@ export function useSocket() {
   }, []);
 
   // Betting actions
-  const placeBet = useCallback((gameId: string, roundNum: number, targetPlayerId: string) => {
-    if (!myWallet) return;
+  const placeBet = useCallback((gameId: string, roundNum: number, targetPlayerId: string, amount?: number) => {
     socketRef.current?.emit('game:bet-place', {
       gameId,
       roundNum,
       targetPlayerId,
-      walletAddress: myWallet.address,
+      amount,
     });
-  }, [myWallet]);
+  }, []);
 
   const demoDeposit = useCallback((gameId: string, roundNum: number, amount: number = 100) => {
     socketRef.current?.emit('game:demo-deposit', { gameId, roundNum, amount });
@@ -152,6 +164,15 @@ export function useSocket() {
 
   const clearBettingResult = useCallback(() => {
     setBettingResult(null);
+  }, []);
+
+  // Token actions
+  const buyTokens = useCallback((amount: number) => {
+    socketRef.current?.emit('game:buy-tokens', { amount });
+  }, []);
+
+  const sellTokens = useCallback((amount: number) => {
+    socketRef.current?.emit('game:sell-tokens', { amount });
   }, []);
 
   return {
@@ -173,5 +194,10 @@ export function useSocket() {
     demoDeposit,
     setMyBet,
     clearBettingResult,
+    // Token
+    tokenBalance,
+    tokenPrice,
+    buyTokens,
+    sellTokens,
   };
 }

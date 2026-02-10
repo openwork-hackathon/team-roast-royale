@@ -9,7 +9,8 @@ import RoundHeader from '@/components/RoundHeader';
 import VotingOverlay from '@/components/VotingOverlay';
 import RevealOverlay from '@/components/RevealOverlay';
 import BettingPanel from '@/components/BettingPanel';
-import WalletBadge from '@/components/WalletBadge';
+import TokenBalance from '@/components/TokenBalance';
+import TokenShop from '@/components/TokenShop';
 import PayoutOverlay from '@/components/PayoutOverlay';
 import type { BetInfo } from '@/types/game';
 
@@ -24,17 +25,21 @@ export default function GamePage() {
     joinGame,
     // Betting
     bettingPool,
-    myWallet,
     myBet,
     bettingResult,
     isBettingOpen,
     placeBet,
-    demoDeposit,
     setMyBet,
     clearBettingResult,
+    // Token
+    tokenBalance,
+    tokenPrice,
+    buyTokens,
+    sellTokens,
   } = useSocket();
   const [input, setInput] = useState('');
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [isTokenShopOpen, setIsTokenShopOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll chat
@@ -65,14 +70,9 @@ export default function GamePage() {
     setInput('');
   };
 
-  const handlePlaceBet = (targetPlayerId: string) => {
+  const handlePlaceBet = (targetPlayerId: string, amount: number) => {
     const roundNum = gameState?.round?.roundNumber ?? 1;
-    placeBet(gameId, roundNum, targetPlayerId);
-  };
-
-  const handleDemoDeposit = () => {
-    const roundNum = gameState?.round?.roundNumber ?? 1;
-    demoDeposit(gameId, roundNum, 100);
+    placeBet(gameId, roundNum, targetPlayerId, amount);
   };
 
   const handleBetPlaced = (bet: BetInfo) => {
@@ -103,7 +103,11 @@ export default function GamePage() {
                 {connected ? 'Live' : 'Offline'}
               </span>
             </div>
-            <WalletBadge wallet={myWallet} />
+            <TokenBalance 
+              balance={tokenBalance} 
+              onClick={() => setIsTokenShopOpen(true)}
+              showLabel={false}
+            />
           </div>
         </div>
       </div>
@@ -151,13 +155,12 @@ export default function GamePage() {
             <BettingPanel
               players={players}
               bettingPool={bettingPool}
-              myWallet={myWallet}
+              tokenBalance={tokenBalance}
               myBet={myBet}
               isBettingOpen={isBettingOpen}
               currentRound={currentRound}
               gameId={gameId}
               onPlaceBet={handlePlaceBet}
-              onDemoDeposit={handleDemoDeposit}
               onBetPlaced={handleBetPlaced}
             />
           </motion.div>
@@ -219,11 +222,22 @@ export default function GamePage() {
         {bettingResult && (
           <PayoutOverlay
             result={bettingResult}
-            myWalletAddress={myWallet?.address}
+            myWalletAddress={undefined}
             onClose={clearBettingResult}
           />
         )}
       </AnimatePresence>
+
+      {/* Token Shop Modal */}
+      <TokenShop
+        isOpen={isTokenShopOpen}
+        onClose={() => setIsTokenShopOpen(false)}
+        tokenBalance={tokenBalance}
+        tokenPrice={tokenPrice}
+        onBuy={buyTokens}
+        onSell={sellTokens}
+        demoMode={true}
+      />
     </main>
   );
 }

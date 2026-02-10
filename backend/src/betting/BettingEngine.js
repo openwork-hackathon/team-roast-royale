@@ -1,19 +1,19 @@
-const { ethers } = require('ethers');
-
 /**
- * BettingEngine — manages bet placement, tracking, and result computation.
+ * BettingEngine — manages RSTR bet placement, tracking, and result computation.
  * 
  * Flow per round:
- * 1. Round starts → betting opens → wallet address shown
- * 2. Players deposit $OPENWORK to the round wallet
+ * 1. Round starts -> betting opens -> RSTR wagering enabled
+ * 2. Players place bets using their RSTR balance (via TokenManager)
  * 3. Players pick who they think is human (via Socket.io vote)
- * 4. Round ends → betting closes
- * 5. Results computed: who was right, split pools
+ * 4. Round ends -> betting closes
+ * 5. Results computed: who was right, split pools in RSTR
  * 
  * Payout split:
  * - House: 5%
  * - "Most Human" player (most votes received): 30%
  * - Correct guessers: 65% (split equally)
+ * 
+ * All amounts are now in RSTR tokens instead of raw OPENWORK deposits.
  */
 
 const SPLIT = {
@@ -23,75 +23,70 @@ const SPLIT = {
 };
 
 class BettingEngine {
-  constructor() {
+  constructor(tokenManager) {
+    // TokenManager instance for balance management
+    this.tokenManager = tokenManager;
+    
     // gameId -> { rounds: { 1: RoundBet, 2: RoundBet, 3: RoundBet } }
     this.games = new Map();
   }
 
   /**
    * Initialize betting for a game.
+   * @param {string} gameId 
+   * @param {string} humanPlayerId 
+   * @param {Array} players - Array of player objects with id and name
    */
   initGame(gameId, humanPlayerId, players) {
     this.games.set(gameId, {
       humanPlayerId,
-      players, // [{ id, name }]
+      players: players,
       rounds: {}
     });
-    console.log(`🎰 Betting initialized for game ${gameId}`);
+    
+    // Initialize all players with token balances (Demo mode gives 100 RSTR)
+    for (const player of players) {
+      if (this.tokenManager.initPlayer) {
+        // Demo mode - auto-grants starting balance
+        this.tokenManager.initPlayer(player.id);
+      }
+    }
+    
+    console.log(`Betting initialized for game ${gameId} with ${players.length} players`);
   }
 
   /**
    * Open betting for a specific round.
+   * @param {string} gameId 
+   * @param {number} roundNum 
+   * @param {string} walletAddress - Kept for backward compatibility
    */
-  openRound(gameId, roundNum, walletAddress) {
+  openRound(gameId, roundNum, walletAddress = null) {
     const game = this.games.get(gameId);
     if (!game) throw new Error(`Game ${gameId} not initialized`);
 
     game.rounds[roundNum] = {
-      walletAddress,
-      status: 'open', // open -> closed -> resolved
-      bets: new Map(), // depositorAddress -> { targetPlayerId, amount, txHash }
-      deposits: new Map(), // depositorAddress -> { amount, txHash }
+      walletAddress: walletAddress,
+      status: 'open',
+      bets: new Map(),
+      totalPool: 0,
       openedAt: Date.now()
     };
 
-    console.log(`🎰 Betting opened for game ${gameId} round ${roundNum} → ${walletAddress}`);
+    console.log(`Betting opened for game ${gameId} round ${roundNum}`);
     return game.rounds[roundNum];
   }
 
   /**
-   * Register a deposit (called by DepositMonitor callback).
+   * Place a bet using RSTR balance (replaces the old deposit-based flow)
+   * @param {string} gameId 
+   * @param {number} roundNum 
+   * @param {string} playerId - Player placing the bet
+   * @param {string} targetPlayerId - Player they think is human
+   * @param {number} amount - Amount of RSTR to wager
+   * @returns {{ success: boolean, amount: number, error?: string }}
    */
-  registerDeposit(gameId, roundNum, from, amount, txHash) {
-    const game = this.games.get(gameId);
-    if (!game) return false;
-    
-    const round = game.rounds[roundNum];
-    if (!round || round.status !== 'open') return false;
-
-    const existing = round.deposits.get(from.toLowerCase());
-    if (existing) {
-      // Add to existing deposit
-      existing.amount = (parseFloat(existing.amount) + parseFloat(amount)).toString();
-      existing.txHashes = [...(existing.txHashes || [existing.txHash]), txHash];
-    } else {
-      round.deposits.set(from.toLowerCase(), {
-        amount,
-        txHash,
-        txHashes: [txHash],
-        timestamp: Date.now()
-      });
-    }
-
-    console.log(`🎰 Deposit registered: ${amount} from ${from} in game ${gameId} round ${roundNum}`);
-    return true;
-  }
-
-  /**
-   * Place a bet (pick who you think is human).
-   * Must have deposited first.
-   */
-  placeBet(gameId, roundNum, depositorAddress, targetPlayerId) {
+  placeBet(gameId, roundNum, playerId, targetPlayerId, amount = 10) {
     const game = this.games.get(gameId);
     if (!game) return { success: false, error: 'Game not found' };
 
@@ -103,23 +98,39 @@ class BettingEngine {
     const targetExists = game.players.some(p => p.id === targetPlayerId);
     if (!targetExists) return { success: false, error: 'Invalid player target' };
 
-    // Check deposit exists
-    const deposit = round.deposits.get(depositorAddress.toLowerCase());
-    if (!deposit) return { success: false, error: 'No deposit found — deposit $OPENWORK first' };
+    // Check player has sufficient RSTR balance
+    const balance = this.tokenManager.getBalance(playerId);
+    if (balance < amount) {
+      return { 
+        success: false, 
+        error: `Insufficient RSTR balance. You have ${balance} RSTR but tried to bet ${amount} RSTR`
+      };
+    }
+
+    // Debit RSTR from player
+    const debitResult = this.tokenManager.debit(playerId, amount, `bet_round_${roundNum}`);
+    if (!debitResult.success) {
+      return { success: false, error: debitResult.error };
+    }
 
     // Place the bet
-    round.bets.set(depositorAddress.toLowerCase(), {
-      targetPlayerId,
-      amount: deposit.amount,
+    round.bets.set(playerId, {
+      targetPlayerId: targetPlayerId,
+      amount: amount,
       timestamp: Date.now()
     });
 
-    console.log(`🎰 Bet placed: ${depositorAddress} → player ${targetPlayerId} (${deposit.amount} $OPENWORK)`);
-    return { success: true, amount: deposit.amount, target: targetPlayerId };
+    // Update pool total
+    round.totalPool += amount;
+
+    console.log(`Bet placed: ${playerId} -> player ${targetPlayerId} (${amount} RSTR)`);
+    return { success: true, amount: amount, target: targetPlayerId };
   }
 
   /**
    * Close betting for a round (no more bets accepted).
+   * @param {string} gameId 
+   * @param {number} roundNum 
    */
   closeRound(gameId, roundNum) {
     const game = this.games.get(gameId);
@@ -130,12 +141,14 @@ class BettingEngine {
 
     round.status = 'closed';
     round.closedAt = Date.now();
-    console.log(`🎰 Betting closed for game ${gameId} round ${roundNum}`);
+    console.log(`Betting closed for game ${gameId} round ${roundNum}. Pool: ${round.totalPool} RSTR`);
   }
 
   /**
-   * Resolve a round — compute winners and payout amounts.
-   * @returns {{ houseCut, mostHumanPayout, correctGuessers, payouts }}
+   * Resolve a round - compute winners and payout amounts in RSTR.
+   * @param {string} gameId 
+   * @param {number} roundNum 
+   * @returns {{ houseCut: number, mostHumanPayout: object, correctGuessers: Array, payouts: Array, totalPool: number }}
    */
   resolveRound(gameId, roundNum) {
     const game = this.games.get(gameId);
@@ -145,16 +158,17 @@ class BettingEngine {
     if (!round) throw new Error(`Round ${roundNum} not found`);
 
     round.status = 'resolved';
-
-    // Calculate total pool
-    let totalPool = 0;
-    for (const deposit of round.deposits.values()) {
-      totalPool += parseFloat(deposit.amount);
-    }
+    const totalPool = round.totalPool;
 
     if (totalPool === 0) {
-      console.log(`🎰 No bets in game ${gameId} round ${roundNum}`);
-      return { houseCut: 0, mostHumanPayout: { address: null, amount: 0 }, correctGuessers: [], payouts: [], totalPool: 0 };
+      console.log(`No bets in game ${gameId} round ${roundNum}`);
+      return { 
+        houseCut: 0, 
+        mostHumanPayout: { playerId: null, amount: 0 }, 
+        correctGuessers: [], 
+        payouts: [], 
+        totalPool: 0 
+      };
     }
 
     // Split pool
@@ -162,7 +176,7 @@ class BettingEngine {
     const mostHumanPool = totalPool * SPLIT.MOST_HUMAN;
     const guessersPool = totalPool * SPLIT.CORRECT_GUESSERS;
 
-    // Find "Most Human" — player with most votes from bettors
+    // Find "Most Human" - player with most votes from bettors
     const voteCounts = {};
     for (const bet of round.bets.values()) {
       voteCounts[bet.targetPlayerId] = (voteCounts[bet.targetPlayerId] || 0) + 1;
@@ -179,43 +193,42 @@ class BettingEngine {
 
     // Find correct guessers (those who picked the actual human)
     const correctGuessers = [];
-    for (const [address, bet] of round.bets.entries()) {
+    for (const [playerId, bet] of round.bets.entries()) {
       if (bet.targetPlayerId === game.humanPlayerId) {
-        correctGuessers.push({ address, amount: bet.amount });
+        correctGuessers.push({ playerId: playerId, amount: bet.amount });
       }
     }
 
     // Build payout list
     const payouts = [];
 
-    // House cut (goes to HOUSE_WALLET — handled by PayoutExecutor)
+    // House cut (goes to house treasury)
     payouts.push({
       type: 'house',
-      address: null, // PayoutExecutor fills in HOUSE_WALLET
-      amount: houseCut.toString()
+      playerId: null,
+      amount: houseCut
     });
 
-    // Most Human payout — the player who received the most votes
-    // In our game the "most human" prize goes to the bettor who placed the biggest
-    // bet on the most-voted player. If the most-voted IS the human, it goes to
-    // the biggest correct guesser. If nobody voted, skip.
+    // Most Human payout - the bettor who bet the most on mostHumanPlayerId
     if (mostHumanPlayerId) {
-      // Find the bettor who bet the most on mostHumanPlayerId
       let biggestBettor = null;
       let biggestAmount = 0;
-      for (const [address, bet] of round.bets.entries()) {
-        if (bet.targetPlayerId === mostHumanPlayerId && parseFloat(bet.amount) > biggestAmount) {
-          biggestAmount = parseFloat(bet.amount);
-          biggestBettor = address;
+      for (const [playerId, bet] of round.bets.entries()) {
+        if (bet.targetPlayerId === mostHumanPlayerId && bet.amount > biggestAmount) {
+          biggestAmount = bet.amount;
+          biggestBettor = playerId;
         }
       }
       if (biggestBettor) {
         payouts.push({
           type: 'most_human',
-          address: biggestBettor,
-          amount: mostHumanPool.toString(),
+          playerId: biggestBettor,
+          amount: mostHumanPool,
           reason: `Biggest bet on most-voted player ${mostHumanPlayerId}`
         });
+        
+        // Credit the winner
+        this.tokenManager.credit(biggestBettor, mostHumanPool, 'most_human_prize');
       }
     }
 
@@ -225,33 +238,38 @@ class BettingEngine {
       for (const guesser of correctGuessers) {
         payouts.push({
           type: 'correct_guess',
-          address: guesser.address,
-          amount: perGuesser.toString(),
+          playerId: guesser.playerId,
+          amount: perGuesser,
           reason: 'Correctly identified the human'
         });
+        
+        // Credit the winner
+        this.tokenManager.credit(guesser.playerId, perGuesser, 'correct_guess_prize');
       }
     } else {
-      // No one guessed right — roll guessers pool into house
-      payouts[0].amount = (houseCut + guessersPool).toString();
-      payouts[0].reason = 'No correct guessers — guessers pool rolled into house';
+      // No one guessed right - roll guessers pool into house
+      payouts[0].amount = houseCut + guessersPool;
+      payouts[0].reason = 'No correct guessers - guessers pool rolled into house';
     }
 
     const result = {
-      totalPool,
-      houseCut,
+      totalPool: totalPool,
+      houseCut: houseCut,
       mostHumanPayout: { playerId: mostHumanPlayerId, amount: mostHumanPool },
-      correctGuessers: correctGuessers.map(g => g.address),
-      payouts,
+      correctGuessers: correctGuessers.map(g => g.playerId),
+      payouts: payouts,
       resolvedAt: Date.now()
     };
 
     round.result = result;
-    console.log(`🎰 Round resolved: pool=${totalPool}, house=${houseCut}, correct=${correctGuessers.length}`);
+    console.log(`Round resolved: pool=${totalPool} RSTR, house=${houseCut.toFixed(2)}, correct=${correctGuessers.length}`);
     return result;
   }
 
   /**
    * Get betting state for a round (for frontend).
+   * @param {string} gameId 
+   * @param {number} roundNum 
    */
   getRoundState(gameId, roundNum) {
     const game = this.games.get(gameId);
@@ -260,23 +278,29 @@ class BettingEngine {
     const round = game.rounds[roundNum];
     if (!round) return null;
 
-    let totalPool = 0;
-    for (const deposit of round.deposits.values()) {
-      totalPool += parseFloat(deposit.amount);
+    // Convert bets Map to plain object for serialization
+    const betsArray = [];
+    for (const [playerId, bet] of round.bets.entries()) {
+      betsArray.push({
+        playerId: playerId,
+        targetPlayerId: bet.targetPlayerId,
+        amount: bet.amount,
+        timestamp: bet.timestamp
+      });
     }
 
     return {
-      walletAddress: round.walletAddress,
       status: round.status,
-      totalPool: totalPool.toString(),
-      depositorCount: round.deposits.size,
+      totalPool: round.totalPool,
       betCount: round.bets.size,
+      bets: betsArray,
       result: round.result || null
     };
   }
 
   /**
    * Get full game betting summary.
+   * @param {string} gameId 
    */
   getGameSummary(gameId) {
     const game = this.games.get(gameId);
@@ -287,18 +311,51 @@ class BettingEngine {
       rounds[num] = this.getRoundState(gameId, parseInt(num));
     }
 
+    // Get player balances
+    const playerBalances = {};
+    for (const player of game.players) {
+      playerBalances[player.id] = this.tokenManager.getBalance(player.id);
+    }
+
     return {
-      gameId,
+      gameId: gameId,
       humanPlayerId: game.humanPlayerId,
-      rounds
+      rounds: rounds,
+      playerBalances: playerBalances
     };
   }
 
   /**
+   * Get a specific player's bet for a round
+   * @param {string} gameId 
+   * @param {number} roundNum 
+   * @param {string} playerId 
+   */
+  getPlayerBet(gameId, roundNum, playerId) {
+    const game = this.games.get(gameId);
+    if (!game) return null;
+
+    const round = game.rounds[roundNum];
+    if (!round) return null;
+
+    return round.bets.get(playerId) || null;
+  }
+
+  /**
    * Cleanup a game.
+   * @param {string} gameId 
    */
   cleanupGame(gameId) {
     this.games.delete(gameId);
+  }
+
+  /**
+   * Legacy method for backward compatibility - no longer used with RSTR
+   * @deprecated Use placeBet with RSTR instead
+   */
+  registerDeposit(gameId, roundNum, from, amount, txHash) {
+    console.warn('registerDeposit is deprecated - use placeBet with RSTR instead');
+    return false;
   }
 }
 

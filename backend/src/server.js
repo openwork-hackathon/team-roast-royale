@@ -146,6 +146,37 @@ app.get('/api/leaderboard', (req, res) => {
   });
 });
 
+// ============================================================
+// TOKEN API ENDPOINTS
+// ============================================================
+
+// GET /api/token/price — Current bonding curve price
+app.get('/api/token/price', (req, res) => {
+  const priceInfo = bettingSystem.getTokenPrice();
+  res.json({
+    symbol: 'RSTR',
+    ...priceInfo,
+    currency: 'OPENWORK'
+  });
+});
+
+// GET /api/token/info — Full token metadata
+app.get('/api/token/info', (req, res) => {
+  const tokenInfo = bettingSystem.getTokenInfo();
+  res.json(tokenInfo);
+});
+
+// GET /api/token/balance/:playerId — Get a player's token balance
+app.get('/api/token/balance/:playerId', (req, res) => {
+  const { playerId } = req.params;
+  const balance = bettingSystem.getTokenBalance(playerId);
+  res.json({
+    playerId,
+    balance,
+    symbol: 'RSTR'
+  });
+});
+
 // Socket.io connection tracking
 io.on('connection', () => {
   console.log(`📡 Clients: ${io.engine?.clientsCount || '?'}`);

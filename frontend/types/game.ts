@@ -111,6 +111,32 @@ export interface ClientEvents {
   'game:message': (data: { gameId: string; content: string }) => void;
   'game:vote': (data: { gameId: string; votedForId: string }) => void;
   // Betting events
-  'game:bet-place': (data: { gameId: string; roundNum: number; targetPlayerId: string; walletAddress: string }) => void;
+  'game:bet-place': (data: { gameId: string; roundNum: number; targetPlayerId: string; walletAddress: string; amount?: number }) => void;
   'game:demo-deposit': (data: { gameId: string; roundNum: number; amount: number }) => void;
+  // Token events
+  'game:buy-tokens': (data: { amount: number }) => void;
+  'game:sell-tokens': (data: { amount: number }) => void;
+}
+
+// Token Types
+export interface TokenBalance {
+  balance: number;
+  symbol: string;
+}
+
+export interface TokenPrice {
+  buyPrice: number;
+  sellPrice: number;
+  totalSupply: number;
+}
+
+export interface TokenInfo {
+  name: string;
+  symbol: string;
+  chain: string;
+  curveType: string;
+  maxSupply: number;
+  contractAddress: string;
+  bondContract: string;
+  mintClubUrl: string;
 }

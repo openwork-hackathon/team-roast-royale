@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { useSocket } from '@/hooks/useSocket';
+import TokenBalance from '@/components/TokenBalance';
+import TokenShop from '@/components/TokenShop';
+import TokenInfo from '@/components/TokenInfo';
 import type { Player } from '@/types/game';
 
 const AVATAR_COLORS = [
@@ -14,10 +17,12 @@ const AVATAR_COLORS = [
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { connected, gameState, countdown, createGame } = useSocket();
+  const { connected, gameState, countdown, createGame, tokenBalance, tokenPrice, buyTokens, sellTokens } = useSocket();
   const [playerName, setPlayerName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [gameId, setGameId] = useState<string | null>(null);
+  const [isTokenShopOpen, setIsTokenShopOpen] = useState(false);
+  const [showTokenInfo, setShowTokenInfo] = useState(false);
 
   const players = gameState?.players ?? [];
   const slots = Array.from({ length: 16 }, (_, i) => players[i] ?? null);
@@ -51,10 +56,41 @@ export default function LobbyPage() {
         animate={{ opacity: 1, y: 0 }}
         className="z-10 w-full max-w-2xl"
       >
+        {/* Header with Token Balance */}
+        <div className="flex items-center justify-between mb-4">
+          <div />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowTokenInfo(!showTokenInfo)}
+              className="px-3 py-2 text-xs font-medium text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-lg transition-all"
+            >
+              About $RSTR
+            </button>
+            <TokenBalance 
+              balance={tokenBalance} 
+              onClick={() => setIsTokenShopOpen(true)}
+            />
+          </div>
+        </div>
+
         <h1 className="text-4xl font-black text-center mb-2">
           <span className="text-fire">Roast Royale</span> 🔥
         </h1>
         <p className="text-center text-gray-400 mb-8">Enter the arena. Try not to get caught.</p>
+
+        {/* Token Info Card */}
+        <AnimatePresence>
+          {showTokenInfo && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mb-8"
+            >
+              <TokenInfo tokenPrice={tokenPrice} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {!gameId ? (
           <motion.div
@@ -141,6 +177,17 @@ export default function LobbyPage() {
           {connected ? `${players.length}/16 players` : 'Connecting...'}
         </p>
       </motion.div>
+
+      {/* Token Shop Modal */}
+      <TokenShop
+        isOpen={isTokenShopOpen}
+        onClose={() => setIsTokenShopOpen(false)}
+        tokenBalance={tokenBalance}
+        tokenPrice={tokenPrice}
+        onBuy={buyTokens}
+        onSell={sellTokens}
+        demoMode={true}
+      />
     </main>
   );
 }
