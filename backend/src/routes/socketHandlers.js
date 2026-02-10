@@ -1,6 +1,40 @@
 const { PHASE } = require('../game/GameEngine');
 
-function setupSocketHandlers(io, gameEngine) {
+function setupSocketHandlers(io, gameEngine, currentLobbyGameIdRef, lobbyHumanCountRef) {
+  // Helper to get current lobby game ID (handles both direct value and getter function)
+  const getCurrentLobbyGameId = () => {
+    if (typeof currentLobbyGameIdRef === 'function') {
+      return currentLobbyGameIdRef();
+    }
+    return currentLobbyGameIdRef;
+  };
+
+  // Helper to set current lobby game ID
+  const setCurrentLobbyGameId = (id) => {
+    if (typeof currentLobbyGameIdRef === 'object' && currentLobbyGameIdRef.current !== undefined) {
+      currentLobbyGameIdRef.current = id;
+    } else {
+      currentLobbyGameIdRef = id;
+    }
+  };
+
+  // Helper to get lobby human count
+  const getLobbyHumanCount = () => {
+    if (typeof lobbyHumanCountRef === 'function') {
+      return lobbyHumanCountRef();
+    }
+    return lobbyHumanCountRef || 0;
+  };
+
+  // Helper to increment lobby human count
+  const incrementLobbyHumanCount = () => {
+    if (typeof lobbyHumanCountRef === 'object' && lobbyHumanCountRef.current !== undefined) {
+      lobbyHumanCountRef.current++;
+    } else if (typeof lobbyHumanCountRef === 'number') {
+      lobbyHumanCountRef++;
+    }
+  };
+
   io.on('connection', (socket) => {
     console.log(`🔌 Client connected: ${socket.id}`);
 
@@ -33,6 +67,97 @@ function setupSocketHandlers(io, gameEngine) {
           game.advancePhase(io);
         }
       }, 5000);
+    });
+
+    // Join auto-match lobby (frontend: game:join-match)
+    socket.on('game:join-match', ({ playerName }, callback) => {
+      if (!playerName) {
+        socket.emit('error', 'Player name required');
+        if (typeof callback === 'function') {
+          callback({ error: 'Player name required' });
+        }
+        return;
+      }
+
+      let lobbyGameId = getCurrentLobbyGameId();
+      let game = lobbyGameId ? gameEngine.getGame(lobbyGameId) : null;
+
+      // If no current lobby or it's full/started, we need a new one
+      // But the server.js auto-cycle should handle this, so we just join the current
+      if (!game) {
+        socket.emit('error', 'No active lobby available');
+        if (typeof callback === 'function') {
+          callback({ error: 'No active lobby available' });
+        }
+        return;
+      }
+
+      // Check if game already started
+      if (game.phase !== PHASE.LOBBY) {
+        socket.emit('error', 'Current lobby has already started');
+        if (typeof callback === 'function') {
+          callback({ error: 'Lobby already started' });
+        }
+        return;
+      }
+
+      // Try to add player as human
+      let player;
+      const humanCount = game.humanPlayers.length;
+
+      if (humanCount === 0) {
+        // First human - use addHumanPlayer
+        const result = game.addHumanPlayer(playerName);
+        if (!result) {
+          socket.emit('error', 'Failed to join game');
+          if (typeof callback === 'function') {
+            callback({ error: 'Failed to join game' });
+          }
+          return;
+        }
+        player = result.player;
+        incrementLobbyHumanCount();
+      } else {
+        // Join existing lobby
+        const joinResult = gameEngine.joinAsHuman(game.id, playerName);
+        if (!joinResult) {
+          socket.emit('error', 'Lobby is full (max 2 players)');
+          if (typeof callback === 'function') {
+            callback({ error: 'Lobby is full' });
+          }
+          return;
+        }
+        player = joinResult.player;
+        incrementLobbyHumanCount();
+      }
+
+      player.isConnected = true;
+      socket.join(game.id);
+      socket.gameId = game.id;
+      socket.playerId = player.id;
+
+      console.log(`🎮 Player ${playerName} joined match lobby ${game.id} (${game.humanPlayers.length}/2 humans)`);
+
+      // Callback with game/player IDs
+      if (typeof callback === 'function') {
+        callback({
+          gameId: game.id,
+          playerId: player.id,
+          isFull: game.humanPlayers.length >= 2,
+          humanCount: game.humanPlayers.length
+        });
+      }
+
+      // Send current game state
+      socket.emit('game:state', game.getPublicState());
+
+      // Notify room about new player
+      io.to(game.id).emit('game:player-joined', {
+        id: player.id,
+        name: player.name,
+        isConnected: true,
+        humanCount: game.humanPlayers.length
+      });
     });
 
     // Join an existing game (frontend: game:join)

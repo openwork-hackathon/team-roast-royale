@@ -60,20 +60,21 @@ class Game {
     this.roastOrder = [];
     this.roastIndex = 0;
     
-    // Create human player
-    this.humanPlayer = {
-      id: uuid().slice(0, 8),
-      name: humanPlayerName,
-      isHuman: true,
-      isConnected: false
-    };
+    // Create human players array (max 2 humans)
+    this.humanPlayers = [];
+    this.humanPlayer = null; // Backward compatibility - first human
     
-    // Create AI players
+    // Create AI players (will be adjusted when humans join)
     this.agentManager = new AgentManager();
-    this.aiPlayers = this.agentManager.createAgents(15);
+    this.aiPlayers = [];
     
-    // All players (shuffled so human isn't always first/last)
-    this.players = this._shufflePlayers([this.humanPlayer, ...this.aiPlayers]);
+    // All players (shuffled so humans aren't always first/last)
+    this.players = [];
+    
+    // Add first human player if provided
+    if (humanPlayerName) {
+      this.addHumanPlayer(humanPlayerName);
+    }
   }
 
   _shufflePlayers(players) {
@@ -83,6 +84,47 @@ class Game {
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
     return shuffled;
+  }
+
+  /**
+   * Add a human player to the game (max 2 humans)
+   * @param {string} playerName 
+   * @returns {{ player: object, isFull: boolean }|null} The new player or null if full
+   */
+  addHumanPlayer(playerName) {
+    if (this.humanPlayers.length >= 2) {
+      return null; // Game is full
+    }
+
+    const player = {
+      id: uuid().slice(0, 8),
+      name: playerName,
+      isHuman: true,
+      isConnected: false
+    };
+
+    this.humanPlayers.push(player);
+    
+    // Keep backward compatibility - first human is the main humanPlayer
+    if (!this.humanPlayer) {
+      this.humanPlayer = player;
+    }
+
+    // Recalculate AI players count: 16 total - humanCount
+    const humanCount = this.humanPlayers.length;
+    const aiCount = 16 - humanCount;
+    
+    // Create AI players if not already created
+    if (this.aiPlayers.length === 0) {
+      this.aiPlayers = this.agentManager.createAgents(aiCount);
+    }
+
+    // Rebuild players list
+    this.players = this._shufflePlayers([...this.humanPlayers, ...this.aiPlayers]);
+
+    console.log(`🎮 Added human player ${playerName} (${this.humanPlayers.length}/2). Total players: ${this.players.length} (${humanCount} humans, ${aiCount} AI)`);
+
+    return { player, isFull: this.humanPlayers.length >= 2 };
   }
 
   // Map backend phases to frontend phase names
@@ -141,7 +183,8 @@ class Game {
       roastOrder: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder.map(p => p.id) : [],
       currentRoastTurn: this.phase === PHASE.ROUND2_ROAST ? this.roastOrder[this.roastIndex]?.id : null,
       timeRemaining: this._getTimeRemaining(),
-      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer.id : null,
+      humanPlayerId: this.phase === PHASE.REVEAL ? this.humanPlayer?.id : null,
+      humanPlayerIds: this.phase === PHASE.REVEAL ? this.humanPlayers.map(h => h.id) : null,
       results: this.phase === PHASE.REVEAL ? this._getVoteResults() : null,
     };
   }
@@ -323,22 +366,25 @@ class Game {
     Object.values(this.votes).forEach(targetId => {
       counts[targetId] = (counts[targetId] || 0) + 1;
     });
+    const humanPlayerIds = new Set(this.humanPlayers.map(h => h.id));
     return this.players.map(p => ({
       playerId: p.id,
       playerName: p.name,
-      isHuman: p.isHuman,
+      isHuman: humanPlayerIds.has(p.id),
       votesReceived: counts[p.id] || 0
     })).sort((a, b) => b.votesReceived - a.votesReceived);
   }
 
   _aiVote() {
-    // Each AI votes — ~40% accuracy (slightly better than random)
-    const nonHumanPlayers = this.players.filter(p => p.id !== this.humanPlayer.id);
+    // Each AI votes — ~40% chance to vote for a human (split between humans if multiple)
+    const humanPlayerIds = this.humanPlayers.map(h => h.id);
     
     for (const agent of this.aiPlayers) {
-      // 40% chance to vote for the actual human
-      if (Math.random() < 0.4) {
-        this.votes[agent.id] = this.humanPlayer.id;
+      // 40% chance to vote for any of the human players
+      if (Math.random() < 0.4 && humanPlayerIds.length > 0) {
+        // Pick a random human if multiple
+        const targetHuman = humanPlayerIds[Math.floor(Math.random() * humanPlayerIds.length)];
+        this.votes[agent.id] = targetHuman;
       } else {
         // Vote for random non-self player
         const candidates = this.players.filter(p => p.id !== agent.id);
@@ -367,7 +413,7 @@ class GameEngine {
     this.totalGamesCreated++;
     
     // Initialize betting for this game
-    if (this.bettingSystem) {
+    if (this.bettingSystem && game.humanPlayer) {
       this.bettingSystem.initGame(
         game.id,
         game.humanPlayer.id,
@@ -382,6 +428,31 @@ class GameEngine {
     }, 30 * 60 * 1000);
     
     return game;
+  }
+
+  /**
+   * Join an existing game as a human player
+   * @param {string} gameId 
+   * @param {string} playerName 
+   * @returns {{ game: Game, player: object }|null} The game and new player, or null if can't join
+   */
+  joinAsHuman(gameId, playerName) {
+    const game = this.games.get(gameId);
+    if (!game) return null;
+    
+    const result = game.addHumanPlayer(playerName);
+    if (!result) return null;
+    
+    // Update betting system with new players list
+    if (this.bettingSystem) {
+      this.bettingSystem.initGame(
+        game.id,
+        game.humanPlayer.id,
+        game.players.map(p => ({ id: p.id, name: p.name }))
+      );
+    }
+    
+    return { game, player: result.player };
   }
 
   getGame(gameId) {

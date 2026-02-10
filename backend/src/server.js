@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -42,6 +43,59 @@ const gameEngine = new GameEngine();
 // Betting system
 const bettingSystem = new BettingSystem();
 gameEngine.setBettingSystem(bettingSystem);
+
+// ====== AUTO-MATCH: 10-MINUTE GAME CYCLE ======
+const MATCH_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+let currentLobbyGameId = null;
+let matchStartTime = Date.now();
+let lobbyHumanCount = 0;
+
+function getTimeUntilNextMatch() {
+  const elapsed = Date.now() - matchStartTime;
+  return Math.max(0, MATCH_INTERVAL_MS - elapsed);
+}
+
+function startNewMatchCycle() {
+  // Start the current lobby game if it has at least 1 human
+  if (currentLobbyGameId && lobbyHumanCount > 0) {
+    const game = gameEngine.getGame(currentLobbyGameId);
+    if (game && game.phase === 'lobby') {
+      console.log(`🎮 Auto-starting lobby game ${currentLobbyGameId} with ${lobbyHumanCount} human(s)`);
+      game.advancePhase(io);
+    }
+  }
+
+  // Create a new lobby game for the next cycle
+  const newGame = gameEngine.createGame(null); // No creator initially
+  currentLobbyGameId = newGame.id;
+  lobbyHumanCount = 0;
+  matchStartTime = Date.now();
+  console.log(`🎯 New lobby created: ${currentLobbyGameId}. Next match in 10 minutes.`);
+
+  // Emit to all clients about new lobby
+  io.emit('match:new-lobby', {
+    gameId: currentLobbyGameId,
+    secondsUntilMatch: Math.ceil(MATCH_INTERVAL_MS / 1000)
+  });
+}
+
+// Initialize first lobby
+startNewMatchCycle();
+
+// Auto-start match every 10 minutes
+setInterval(() => {
+  startNewMatchCycle();
+}, MATCH_INTERVAL_MS);
+
+// Broadcast match timer every second
+setInterval(() => {
+  const remaining = getTimeUntilNextMatch();
+  io.emit('match:timer', {
+    secondsRemaining: Math.ceil(remaining / 1000),
+    currentGameId: currentLobbyGameId,
+    humanCount: lobbyHumanCount
+  });
+}, 1000);
 
 // Health check
 app.get('/health', (req, res) => {
@@ -123,6 +177,28 @@ app.post('/api/games', (req, res) => {
   }
 });
 
+// GET /api/games/current — Get current lobby game (auto-match) — MUST be before :gameId route!
+app.get('/api/games/current', (req, res) => {
+  const game = currentLobbyGameId ? gameEngine.getGame(currentLobbyGameId) : null;
+  if (!game) {
+    return res.status(404).json({ error: 'No current lobby game available' });
+  }
+
+  res.json({
+    gameId: game.id,
+    phase: game.phase,
+    humanCount: lobbyHumanCount,
+    maxHumans: 2,
+    secondsUntilMatch: Math.ceil(getTimeUntilNextMatch() / 1000),
+    players: game.players.map(p => ({
+      id: p.id,
+      name: p.name,
+      isHuman: p.isHuman
+    })),
+    createdAt: game.createdAt
+  });
+});
+
 // REST: Get game state (for reconnection)
 app.get('/api/games/:gameId', (req, res) => {
   const game = gameEngine.getGame(req.params.gameId);
@@ -182,8 +258,17 @@ io.on('connection', () => {
   console.log(`📡 Clients: ${io.engine?.clientsCount || '?'}`);
 });
 
-// Socket.io handlers
-setupSocketHandlers(io, gameEngine);
+// Socket.io handlers (pass lobby refs)
+const lobbyRef = {
+  get current() { return currentLobbyGameId; },
+  set current(val) { currentLobbyGameId = val; }
+};
+const lobbyCountRef = {
+  get current() { return lobbyHumanCount; },
+  set current(val) { lobbyHumanCount = val; },
+  increment() { lobbyHumanCount++; }
+};
+setupSocketHandlers(io, gameEngine, () => currentLobbyGameId, () => lobbyHumanCount);
 
 // Betting socket handlers
 bettingSystem.setupSocketHandlers(io);

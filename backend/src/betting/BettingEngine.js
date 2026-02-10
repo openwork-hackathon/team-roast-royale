@@ -22,6 +22,8 @@ const SPLIT = {
   CORRECT_GUESSERS: 0.65  // 65%
 };
 
+const RECOMMENDED_BET = 50; // 50 RSTR per round (150 RSTR for full 3-round game)
+
 class BettingEngine {
   constructor(tokenManager) {
     // TokenManager instance for balance management
@@ -359,4 +361,4 @@ class BettingEngine {
   }
 }
 
-module.exports = { BettingEngine, SPLIT };
+module.exports = { BettingEngine, SPLIT, RECOMMENDED_BET };

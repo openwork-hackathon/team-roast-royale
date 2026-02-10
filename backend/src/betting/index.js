@@ -1,4 +1,4 @@
-const { BettingEngine } = require('./BettingEngine');
+const { BettingEngine, RECOMMENDED_BET } = require('./BettingEngine');
 const { TokenManager } = require('./TokenManager');
 const { DemoTokenManager } = require('./DemoTokenManager');
 
@@ -223,7 +223,13 @@ class BettingSystem {
    * Get full token info
    */
   getTokenInfo() {
-    return this.tokenManager.getTokenInfo();
+    const info = this.tokenManager.getTokenInfo();
+    return {
+      ...info,
+      recommendedBet: RECOMMENDED_BET,
+      recommendedBetTotal: RECOMMENDED_BET * 3, // For all 3 rounds
+      recommendedBetNote: `${RECOMMENDED_BET} RSTR per round (${RECOMMENDED_BET * 3} RSTR for full 3-round game)`
+    };
   }
 
   /**

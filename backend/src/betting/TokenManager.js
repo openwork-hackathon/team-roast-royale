@@ -5,13 +5,13 @@
  * In production mode, can read on-chain price from Mint Club contract.
  */
 
-// Bonding curve configuration (10-step linear curve)
+// Bonding curve configuration (flat pricing for hackathon)
 const BONDING_CONFIG = {
-  minPrice: 0.0001,      // Step 1: 0.0001 OPENWORK per RSTR
-  maxPrice: 0.001,       // Step 10: 0.001 OPENWORK per RSTR
-  steps: 10,
-  maxSupply: 1_000_000,  // 1M max supply
-  royaltyPercent: 0.03   // 3% buy/sell royalty
+  minPrice: 100,        // 100 OPENWORK per RSTR (was 0.0001)
+  maxPrice: 100,        // Flat rate: 100 OPENWORK per RSTR
+  steps: 1,             // Single step = flat pricing
+  maxSupply: 1_000_000, // Keep 1M max
+  royaltyPercent: 0.03  // Keep 3%
 };
 
 // Mint Club contract addresses
@@ -27,6 +27,11 @@ const CONTRACTS = {
  * @returns {number} Price in OPENWORK per RSTR
  */
 function calculatePriceAtSupply(currentSupply) {
+  // Flat pricing: always return minPrice (= maxPrice for flat curve)
+  if (BONDING_CONFIG.steps <= 1 || BONDING_CONFIG.minPrice === BONDING_CONFIG.maxPrice) {
+    return BONDING_CONFIG.minPrice;
+  }
+  
   const stepSize = BONDING_CONFIG.maxSupply / BONDING_CONFIG.steps;
   const step = Math.min(
     Math.floor(currentSupply / stepSize),

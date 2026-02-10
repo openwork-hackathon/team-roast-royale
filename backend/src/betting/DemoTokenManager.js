@@ -15,7 +15,7 @@ const {
   calculatePriceAtSupply
 } = require('./TokenManager');
 
-const DEMO_STARTING_BALANCE = 100; // 100 RSTR for every new player
+const DEMO_STARTING_BALANCE = 1000; // 1000 RSTR for every new player
 
 class DemoTokenManager {
   constructor() {
@@ -31,7 +31,7 @@ class DemoTokenManager {
     // Track all transactions for debugging
     this.transactions = [];
     
-    console.log('🪙 DemoTokenManager initialized — 100 RSTR starting balance for all players');
+    console.log('🪙 DemoTokenManager initialized — 1000 RSTR starting balance for all players');
   }
 
   /**
